@@ -14,7 +14,6 @@ io.set('transports', ['polling']);
 var port = process.env.PORT || 4000;
 
 io.sockets.on('connection', function (socket) {
-
   socket.emit('message', { text : 'Welcome!' });
 
   socket.on('subscribe', function (data) {
@@ -23,26 +22,41 @@ io.sockets.on('connection', function (socket) {
 });
 
 async.retry(
-  {times: 1000, interval: 1000},
-  function(callback) {
-    pg.connect('postgres://postgres@db/postgres', function(err, client, done) {
+  { times: 1000, interval: 1000 },
+  function (callback) {
+    pg.connect('postgres://postgres:postgres@db/postgres', function (err, client, done) {
       if (err) {
         console.error("Waiting for db");
       }
       callback(err, client);
     });
   },
-  function(err, client) {
+  function (err, client) {
     if (err) {
       return console.error("Giving up");
     }
     console.log("Connected to db");
-    getVotes(client);
+
+    // ✅ Create table if it doesn't exist
+    client.query(`
+      CREATE TABLE IF NOT EXISTS votes (
+        id SERIAL PRIMARY KEY,
+        vote VARCHAR(255) NOT NULL
+      )
+    `, function (err) {
+      if (err) {
+        console.error("Failed to ensure votes table exists:", err);
+        process.exit(1);
+      }
+
+      console.log("Ensured votes table exists");
+      getVotes(client);
+    });
   }
 );
 
 function getVotes(client) {
-  client.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote', [], function(err, result) {
+  client.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote', [], function (err, result) {
     if (err) {
       console.error("Error performing query: " + err);
     } else {
@@ -50,12 +64,12 @@ function getVotes(client) {
       io.sockets.emit("scores", JSON.stringify(votes));
     }
 
-    setTimeout(function() {getVotes(client) }, 1000);
+    setTimeout(function () { getVotes(client) }, 1000);
   });
 }
 
 function collectVotesFromResult(result) {
-  var votes = {a: 0, b: 0};
+  var votes = { a: 0, b: 0 };
 
   result.rows.forEach(function (row) {
     votes[row.vote] = parseInt(row.count);
@@ -64,16 +78,18 @@ function collectVotesFromResult(result) {
   return votes;
 }
 
+// Middleware setup
 app.use(cookieParser());
 app.use(bodyParser());
 app.use(methodOverride('X-HTTP-Method-Override'));
-app.use(function(req, res, next) {
+app.use(function (req, res, next) {
   res.header("Access-Control-Allow-Origin", "*");
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
   res.header("Access-Control-Allow-Methods", "PUT, GET, POST, DELETE, OPTIONS");
   next();
 });
 
+// Static and main route
 app.use(express.static(__dirname + '/views'));
 
 app.get('/', function (req, res) {
@@ -84,3 +100,4 @@ server.listen(port, function () {
   var port = server.address().port;
   console.log('App running on port ' + port);
 });
+
